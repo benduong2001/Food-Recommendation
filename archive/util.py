@@ -87,6 +87,13 @@ if USING_SPARK == 1:
             .appName('food_rec') \
             .getOrCreate()
 
+def get_negative_words_of_stop_words(stop_words):
+    negative_words = ["no","not","t","nor","against"] # constant
+    contraction_not_words = [word for word in stop_words if word[-2:]=="'t"]
+    contraction_not_words_pre_apostrophe = [word[:-2] for word in contraction_not_words]
+    negative_words += contraction_not_words
+    negative_words += contraction_not_words_pre_apostrophe
+    return negative_words
 
 def temp_interaction_metrics(temp_df, column_name_a, column_name_b):
     print("{0}s by {1}".format(column_name_b, column_name_a))
