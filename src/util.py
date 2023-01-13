@@ -67,25 +67,13 @@ from sklearn.preprocessing import LabelEncoder
 
 
 
-USING_SPARK = 0
-SPARK_SESSION_VERSION = 1
-if USING_SPARK == 1:
-    import findspark
-    import pyspark
-    import pyspark.sql.functions as F
-    import pyspark.sql.types as T
-    import pyspark.ml as M
-    from pyspark.sql.window import Window
-    from pyspark.sql import SparkSession
-    findspark.init()
-    if SPARK_SESSION_VERSION == 1:
-        spark = SparkSession.builder.getOrCreate()
-    elif SPARK_SESSION_VERSION == 2:
-        spark = SparkSession.builder \
-            .master('local[*]') \
-            .config("spark.driver.memory", "3g") \
-            .appName('food_rec') \
-            .getOrCreate()
+import findspark
+import pyspark
+import pyspark.sql.functions as F
+import pyspark.sql.types as T
+import pyspark.ml as M
+from pyspark.sql.window import Window
+from pyspark.sql import SparkSession
 
 def get_negative_words_of_stop_words(stop_words):
     negative_words = ["no","not","t","nor","against"] # constant
@@ -657,6 +645,8 @@ class Word2vec_Dataset_Reader:
         else:
             vector_mode = configs["Word2vec_Dataset_Reader"]["vector_mode"]
             using_spark = configs["Word2vec_Dataset_Reader"]["using_spark"]
+        if using_spark == 1:
+            vector_mode = "SPLIT"
         assert vector_mode in ["COMPRESSED","SPLIT"]
         self.word2vec_model = word2vec_model
         self.lexicon = lexicon

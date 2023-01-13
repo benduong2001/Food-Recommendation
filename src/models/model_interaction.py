@@ -63,7 +63,7 @@ import util
 import features.data_preparation_interaction as dpi
 
 
-print(dpi.Temp_Interaction_Data_Preparation_Builder)
+#print(dpi.Temp_Interaction_Data_Preparation_Builder)
 
 import tqdm
 import pickle
@@ -82,26 +82,13 @@ from sklearn.preprocessing import LabelEncoder
 
 import string
 
-USING_SPARK = 0
-SPARK_SESSION_VERSION = 1
-if USING_SPARK == 1:
-    import findspark
-    import pyspark
-    import pyspark.sql.functions as F
-    import pyspark.sql.types as T
-    import pyspark.ml as M
-    from pyspark.sql.window import Window
-    from pyspark.sql import SparkSession
-    findspark.init()
-    if SPARK_SESSION_VERSION == 1:
-        spark = SparkSession.builder.getOrCreate()
-    elif SPARK_SESSION_VERSION == 2:
-        spark = (SparkSession.builder
-        .master('local[*]')
-        .config("spark.driver.memory", "3g")
-        .appName('food_rec')
-        .getOrCreate()
-)
+import findspark
+import pyspark
+import pyspark.sql.functions as F
+import pyspark.sql.types as T
+import pyspark.ml as M
+from pyspark.sql.window import Window
+from pyspark.sql import SparkSession
 
 class Temp_Interaction_Model_Builder:
     def __init__(
@@ -185,3 +172,88 @@ class Temp_Interaction_Model_Builder:
         self.evaluate_metrics(self.y_val, y_predictions)
         return model
     
+    
+class Temp_Interaction_Model_Builder_Pyspark (Temp_Interaction_Model_Builder):
+    def __init__(
+        self,
+        data_preparation
+    ):
+        super(Temp_Interaction_Model_Builder_Pyspark, self).__init__(data_preparation)
+        self.target_column_name = "y"
+    def set_up(self, reviews_df):
+        
+        target_column_name = self.target_column_name
+        
+        X_seen = self.data_preparation.conjoin_embeddings(self.self.data_preparation.id2vec_df)
+        seen_pairs_with_target = X_seen.withColumn(target_column_name, F.lit(1))
+        y_seen = seen_pairs_with_target.select(F.col(target_column_name))
+    
+        X_unseen = self.data_preparation.conjoin_embeddings(self.data_preparation.id2vec_df_unseen)
+        unseen_pairs_with_target = X_unseen.withColumn(target_column_name, F.lit(0))
+        y_unseen = unseen_pairs_with_target.select(F.col(target_column_name))
+        
+        final_interaction = seen_pairs_with_target.union(unseen_pairs_with_target)
+        final_interaction = final_interaction.sample(fraction=1)
+        
+        if self.data_preparation.with_concatenated == 1:
+            user_vec_column_names = ["user_"+x for x in self.data_preparation.vec_column_names]
+            business_vec_column_names = ["business_"+x for x in self.data_preparation.vec_column_names]
+
+            input_column_names = user_vec_column_names + business_vec_column_names
+        else:
+            input_column_names = self.data_preparation.vec_column_names
+        assembler = M.features.VectorAssembler(inputCols = input_column_names, outputCol='features')
+        
+        
+        final_interaction = assembler.transform(final_interaction).select(
+            F.col('features'), F.col(target_column_name))
+        
+        splitted = final_interaction.randomSplit([0.75, 0.25], 1)
+        
+        train_interaction = splitted[0]
+        test_interaction = splitted[1]
+        self.train_interaction = train_interaction
+        self.test_interaction = test_interaction
+        input_selected_column_names = [F.col(x) for x in input_column_names]
+        
+        X_train = train_interaction.select(*input_column_names)
+        X_val = test_interaction.select(*input_column_names)
+        y_train = train_interaction.select(F.col(target_column_name))
+        y_val = test_interaction.select(F.col(target_column_name))
+        
+        self.X_train = X_train
+        self.X_val = X_val
+        self.y_train = y_train
+        self.y_val = y_val
+        return X_train, X_val, y_train, y_val
+    def logistic_regression(self):
+        lr = M.classification.LogisticRegression(labelCol = target_column_name,
+                                             featuresCol="features")
+        model = lr
+        return model
+    def train_model(self, model=None):
+        if model is None:
+            model = self.model 
+        model.fit(self.train_interaction)
+        return model
+    def evaluate_metrics(self, predictions):
+        evaluation = m.BinaryClassificationEvaluator(
+            rawPredictionCol = "prediction", 
+            labelCol = self.target_column_name)
+        auc = evaluation.evaluate(predictions.predictions)
+        print("AUC:", auc)
+        return auc
+    def validate_model(self, model=None):
+        if model is None:
+            model = self.model 
+        predictions = model.transform(self.X_val)
+        self.evaluate_metrics(predictions)
+        return model
+
+    def baseline(self, reviews_df):
+        self.data_preparation.with_concatenated = 0
+        self.set_up(reviews_df)
+        model = self.logistic_regression()
+        model = self.train_model(model)
+        model = self.validate_model(model)
+        
